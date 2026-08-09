@@ -868,7 +868,7 @@ app.listen(
   () => {
 
     console.log(
-      "The Ravishankar Insights Backend running on http://127.0.0.1:5000"
+      "The Ravishankar Insights Backend running on http://0.0.0.0:$PORT"
     );
 
   }
