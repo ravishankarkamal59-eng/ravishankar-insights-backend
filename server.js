@@ -246,13 +246,7 @@ const otpStore = {};
 // ===============================
 
 app.get("/", (req, res) => {
-
-  res.json({
-    success: true,
-    message:
-      "The Ravishankar Insights Backend is running."
-  });
-
+  res.sendFile(path.join(__dirname, "public", "index.html"));
 });
 
 
