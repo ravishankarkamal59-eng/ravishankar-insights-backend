@@ -245,6 +245,27 @@ const otpStore = {};
 // BACKEND CHECK
 // ===============================
 
+app.get("/api/materials/:section", (req, res) => {
+  try {
+    const section = String(req.params.section || "").toLowerCase();
+    const allowed = ["ba","ma","upsc","uppcs","net-jrf","railway","ssc","banking"];
+    if (!allowed.includes(section)) {
+      return res.status(400).json({ success:false, message:"Invalid section" });
+    }
+    const folder = path.join(uploadsDir, section);
+    if (!fs.existsSync(folder)) {
+      return res.json({ success:true, files:[] });
+    }
+    const files = fs.readdirSync(folder).map(name => ({
+      name,
+      url: "/uploads/" + section + "/" + encodeURIComponent(name)
+    }));
+    res.json({ success:true, section, files });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ success:false, message:"Materials load नहीं हो पाए।" });
+  }
+});
 app.get("/", (req, res) => {
   res.sendFile(path.join(__dirname, "public", "index.html"));
 });
