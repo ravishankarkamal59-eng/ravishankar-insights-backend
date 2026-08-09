@@ -214,7 +214,7 @@ app.post(
 
   }
 );
-const PORT = 5000;
+const PORT = process.env.PORT || 5000;
 
 const articlesFile =
   path.join(__dirname, "articles.json");
