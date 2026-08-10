@@ -247,6 +247,77 @@ const otpStore = {};
 
 app.get("/api/materials/:section", (req, res) => {
   try {
+// ===============================
+// ADMIN DELETE MATERIAL
+// ===============================
+
+app.delete("/api/admin/materials/:section/:filename", requireAdmin, (req, res) => {
+
+  try {
+
+    const section = String(req.params.section || "").toLowerCase();
+
+    const filename = path.basename(req.params.filename || "");
+
+    const allowedSections = [
+      "ba",
+      "ma",
+      "upsc",
+      "net-jrf",
+      "uppcs",
+      "railway",
+      "ssc",
+      "banking"
+    ];
+
+    if (!allowedSections.includes(section)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid section."
+      });
+    }
+
+    if (!filename) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid file."
+      });
+    }
+
+    const filePath = path.join(
+      uploadsDir,
+      section,
+      filename
+    );
+
+    if (!fs.existsSync(filePath)) {
+      return res.status(404).json({
+        success: false,
+        message: "File नहीं मिली।"
+      });
+    }
+
+    fs.unlinkSync(filePath);
+
+    res.json({
+      success: true,
+      message: "File successfully deleted.",
+      file: filename,
+      section: section
+    });
+
+  } catch (error) {
+
+    console.error(error);
+
+    res.status(500).json({
+      success: false,
+      message: "File delete नहीं हो पाई।"
+    });
+
+  }
+
+});
     const section = String(req.params.section || "").toLowerCase();
     const allowed = ["ba","ma","upsc","uppcs","net-jrf","railway","ssc","banking"];
     if (!allowed.includes(section)) {
