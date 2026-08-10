@@ -165,6 +165,29 @@ button:hover{opacity:.9}
       <div id="uploadMessage"></div>
     </div>
 
+<!-- FILE MANAGER -->
+    <div class="card">
+      <h2>📂 Section File Manager</h2>
+
+      <label>Select Section</label>
+
+      <select id="manageSection">
+        <option value="ba">BA</option>
+        <option value="ma">MA</option>
+        <option value="upsc">UPSC</option>
+        <option value="net-jrf">NET-JRF</option>
+        <option value="uppcs">UPPCS</option>
+        <option value="railway">Railway</option>
+        <option value="ssc">SSC</option>
+        <option value="banking">Banking</option>
+      </select>
+
+      <button onclick="loadMaterials()">🔄 Load Files</button>
+
+      <div id="materialsMessage"></div>
+      <div id="materialsList"></div>
+    </div>
+
   </div>
 
 </div>
@@ -427,6 +450,148 @@ async function uploadPDF(){
 
     message.textContent =
       "❌ Upload failed.";
+
+  }
+
+}
+
+
+
+async function loadMaterials(){
+
+  const section =
+    document.getElementById("manageSection").value;
+
+  const message =
+    document.getElementById("materialsMessage");
+
+  const list =
+    document.getElementById("materialsList");
+
+  if(!token){
+    message.textContent = "❌ पहले Admin Login करें।";
+    return;
+  }
+
+  message.textContent = "⏳ Files load हो रही हैं...";
+  list.innerHTML = "";
+
+  try{
+
+    const response =
+      await fetch("/api/materials/" + section);
+
+    const data =
+      await response.json();
+
+    if(!data.success){
+      message.textContent =
+        "❌ " + (data.message || "Files load नहीं हुईं।");
+      return;
+    }
+
+    if(!data.files || data.files.length === 0){
+      message.textContent = "ℹ️ इस section में अभी कोई file नहीं है।";
+      return;
+    }
+
+    message.textContent =
+      "✅ " + data.files.length + " file मिलीं।";
+
+    data.files.forEach(function(file){
+
+      const box = document.createElement("div");
+
+      box.style.cssText =
+        "padding:12px;margin:8px 0;background:#f8fafc;" +
+        "border:1px solid #cbd5e1;border-radius:10px;";
+
+      const name = document.createElement("span");
+      name.textContent = "📄 " + file.name;
+
+      const button = document.createElement("button");
+
+      button.textContent = "🗑️ Delete";
+      button.style.background = "#dc2626";
+      button.style.marginTop = "8px";
+
+      button.onclick = function(){
+        deleteMaterial(section, file.name);
+      };
+
+      box.appendChild(name);
+      box.appendChild(button);
+
+      list.appendChild(box);
+
+    });
+
+  }catch(error){
+
+    console.error(error);
+
+    message.textContent =
+      "❌ Server से connection नहीं हो पाया।";
+
+  }
+
+}
+
+
+async function deleteMaterial(section, filename){
+
+  if(!token){
+    alert("पहले Admin Login करें।");
+    return;
+  }
+
+  if(!confirm(
+    "क्या आप यह file delete करना चाहते हैं?\n\n" +
+    filename
+  )){
+    return;
+  }
+
+  try{
+
+    const response =
+      await fetch("/api/admin/materials/" +
+        encodeURIComponent(section) +
+        "/" +
+        encodeURIComponent(filename),{
+
+          method:"DELETE",
+
+          headers:{
+            "Authorization":
+              "Bearer " + token
+          }
+
+        });
+
+    const data =
+      await response.json();
+
+    if(data.success){
+
+      alert("✅ File delete हो गई।");
+
+      loadMaterials();
+
+    }else{
+
+      alert(
+        "❌ " +
+        (data.message || "File delete नहीं हुई।")
+      );
+
+    }
+
+  }catch(error){
+
+    console.error(error);
+
+    alert("❌ Server से connection नहीं हो पाया।");
 
   }
 
