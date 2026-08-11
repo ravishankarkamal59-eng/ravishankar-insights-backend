@@ -309,26 +309,24 @@ const otpStore = {};
 // BACKEND CHECK
 // ===============================
 
+// ===============================
+// MATERIALS GET
+// ===============================
+
 app.get("/api/materials/:section", (req, res) => {
-  try {
-// ===============================
-// ADMIN DELETE MATERIAL
-// ===============================
-
-app.delete("/api/admin/materials/:section/:filename", requireAdmin, (req, res) => {
 
   try {
 
-    const section = String(req.params.section || "").toLowerCase();
-
-    const filename = path.basename(req.params.filename || "");
+    const section =
+      String(req.params.section || "")
+        .toLowerCase();
 
     const allowedSections = [
       "ba",
       "ma",
       "upsc",
-      "net-jrf",
       "uppcs",
+      "net-jrf",
       "railway",
       "ssc",
       "banking",
@@ -351,37 +349,33 @@ app.delete("/api/admin/materials/:section/:filename", requireAdmin, (req, res) =
     if (!allowedSections.includes(section)) {
       return res.status(400).json({
         success: false,
-        message: "Invalid section."
+        message: "Invalid section"
       });
     }
 
-    if (!filename) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid file."
+    const folder = path.join(uploadsDir, section);
+
+    if (!fs.existsSync(folder)) {
+      return res.json({
+        success: true,
+        section,
+        files: []
       });
     }
 
-    const filePath = path.join(
-      uploadsDir,
-      section,
-      filename
-    );
-
-    if (!fs.existsSync(filePath)) {
-      return res.status(404).json({
-        success: false,
-        message: "File नहीं मिली।"
-      });
-    }
-
-    fs.unlinkSync(filePath);
+    const files = fs.readdirSync(folder).map(name => ({
+      name,
+      url:
+        "/uploads/" +
+        section +
+        "/" +
+        encodeURIComponent(name)
+    }));
 
     res.json({
       success: true,
-      message: "File successfully deleted.",
-      file: filename,
-      section: section
+      section,
+      files
     });
 
   } catch (error) {
@@ -390,36 +384,109 @@ app.delete("/api/admin/materials/:section/:filename", requireAdmin, (req, res) =
 
     res.status(500).json({
       success: false,
-      message: "File delete नहीं हो पाई।"
+      message: "Materials load नहीं हो पाए।"
     });
 
   }
 
 });
-    const section = String(req.params.section || "").toLowerCase();
-    const allowed = ["ba","ma","upsc","uppcs","net-jrf","railway","ssc","banking","teaching",
-      "armed-forces",
-      "railway-exams",
-      "banking-exams",
-      "state-psc",
-      "civil-defence","research","engineering","medical","university-law","up-government","insurance","law-professional","police-defence"];
-    if (!allowed.includes(section)) {
-      return res.status(400).json({ success:false, message:"Invalid section" });
+
+
+// ===============================
+// ADMIN DELETE MATERIAL
+// ===============================
+
+app.delete(
+  "/api/admin/materials/:section/:filename",
+  requireAdmin,
+  (req, res) => {
+
+    try {
+
+      const section =
+        String(req.params.section || "")
+          .toLowerCase();
+
+      const filename =
+        path.basename(req.params.filename || "");
+
+      const allowedSections = [
+        "ba",
+        "ma",
+        "upsc",
+        "uppcs",
+        "net-jrf",
+        "railway",
+        "ssc",
+        "banking",
+        "teaching",
+        "armed-forces",
+        "railway-exams",
+        "banking-exams",
+        "state-psc",
+        "civil-defence",
+        "law-professional",
+        "insurance",
+        "up-government",
+        "university-law",
+        "medical",
+        "engineering",
+        "research",
+        "police-defence"
+      ];
+
+      if (!allowedSections.includes(section)) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid section."
+        });
+      }
+
+      if (!filename) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid file."
+        });
+      }
+
+      const filePath =
+        path.join(
+          uploadsDir,
+          section,
+          filename
+        );
+
+      if (!fs.existsSync(filePath)) {
+        return res.status(404).json({
+          success: false,
+          message: "File नहीं मिली।"
+        });
+      }
+
+      fs.unlinkSync(filePath);
+
+      res.json({
+        success: true,
+        message: "File successfully deleted.",
+        file: filename,
+        section: section
+      });
+
+    } catch (error) {
+
+      console.error(error);
+
+      res.status(500).json({
+        success: false,
+        message: "File delete नहीं हो पाई।"
+      });
+
     }
-    const folder = path.join(uploadsDir, section);
-    if (!fs.existsSync(folder)) {
-      return res.json({ success:true, files:[] });
-    }
-    const files = fs.readdirSync(folder).map(name => ({
-      name,
-      url: "/uploads/" + section + "/" + encodeURIComponent(name)
-    }));
-    res.json({ success:true, section, files });
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ success:false, message:"Materials load नहीं हो पाए।" });
+
   }
-});
+);
+
+
 app.get("/", (req, res) => {
   res.sendFile(path.join(__dirname, "public", "index.html"));
 });
