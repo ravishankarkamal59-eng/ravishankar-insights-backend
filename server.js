@@ -4,6 +4,13 @@ const cors = require("cors");
 const fs = require("fs");
 const path = require("path");
 const multer = require("multer");
+const { Pool } = require("pg");
+
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: { rejectUnauthorized: false }
+});
+
 const TWOFACTOR_API_KEY = process.env.TWOFACTOR_API_KEY;
 const TWOFACTOR_TEMPLATE_NAME = process.env.TWOFACTOR_TEMPLATE_NAME;
 const app = express();
@@ -784,25 +791,16 @@ app.post(
       }
 
 
-      const users =
-        JSON.parse(
-          fs.readFileSync(
-            usersFile,
-            "utf8"
-          )
-        );
+      const normalizedEmail = email.trim().toLowerCase();
 
+      const existingUser = await pool.query(
+        `SELECT id FROM students
+         WHERE LOWER(email) = $1 OR mobile = $2
+         LIMIT 1`,
+        [normalizedEmail, mobile]
+      );
 
-      const alreadyExists =
-        users.find(
-          user =>
-            user.email === email
-            ||
-            user.mobile === mobile
-        );
-
-
-      if (alreadyExists) {
+      if (existingUser.rows.length > 0) {
 
         return res.status(400).json({
 
@@ -815,39 +813,25 @@ app.post(
 
       }
 
+      const bcrypt = require("bcryptjs");
 
-      const newUser = {
+      const passwordHash =
+        await bcrypt.hash(password, 10);
 
-        id: Date.now(),
-
-        name: name,
-
-        mobile: mobile,
-
-        email: email,
-
-        password: password,
-
-        createdAt:
-          new Date().toISOString()
-
-      };
-
-
-      users.push(newUser);
-
-
-      fs.writeFileSync(
-
-        usersFile,
-
-        JSON.stringify(
-          users,
-          null,
-          2
-        )
-
+      const result = await pool.query(
+        `INSERT INTO students
+         (name, mobile, email, password)
+         VALUES ($1, $2, $3, $4)
+         RETURNING id, name, mobile, email, created_at`,
+        [
+          name.trim(),
+          mobile,
+          normalizedEmail,
+          passwordHash
+        ]
       );
+
+      const newUser = result.rows[0];
 
 
       delete otpStore[mobile];
@@ -926,25 +910,18 @@ app.post(
       }
 
 
-      const users =
-        JSON.parse(
-          fs.readFileSync(
-            usersFile,
-            "utf8"
-          )
-        );
+      const normalizedEmail =
+        email.trim().toLowerCase();
 
+      const result = await pool.query(
+        `SELECT id, name, mobile, email, password
+         FROM students
+         WHERE LOWER(email) = $1
+         LIMIT 1`,
+        [normalizedEmail]
+      );
 
-      const user =
-        users.find(
-          item =>
-            item.email === email
-            &&
-            item.password === password
-        );
-
-
-      if (!user) {
+      if (result.rows.length === 0) {
 
         return res.status(401).json({
 
@@ -957,6 +934,28 @@ app.post(
 
       }
 
+      const user = result.rows[0];
+
+      const bcrypt = require("bcryptjs");
+
+      const passwordMatch =
+        await bcrypt.compare(
+          password,
+          user.password
+        );
+
+      if (!passwordMatch) {
+
+        return res.status(401).json({
+
+          success: false,
+
+          message:
+            "Email या Password गलत है।"
+
+        });
+
+      }
 
       res.json({
 
