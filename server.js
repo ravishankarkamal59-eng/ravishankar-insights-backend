@@ -91,7 +91,21 @@ const storage = multer.diskStorage({
       "uppcs",
       "railway",
       "ssc",
-      "banking"
+      "banking",
+      "teaching",
+      "armed-forces",
+      "railway-exams",
+      "banking-exams",
+      "state-psc",
+      "civil-defence",
+      "law-professional",
+      "insurance",
+      "up-government",
+      "university-law",
+      "medical",
+      "engineering",
+      "research",
+      "police-defence"
     ];
 
     if (!allowedSections.includes(section)) {
@@ -267,7 +281,21 @@ app.delete("/api/admin/materials/:section/:filename", requireAdmin, (req, res) =
       "uppcs",
       "railway",
       "ssc",
-      "banking"
+      "banking",
+      "teaching",
+      "armed-forces",
+      "railway-exams",
+      "banking-exams",
+      "state-psc",
+      "civil-defence",
+      "law-professional",
+      "insurance",
+      "up-government",
+      "university-law",
+      "medical",
+      "engineering",
+      "research",
+      "police-defence"
     ];
 
     if (!allowedSections.includes(section)) {
@@ -319,7 +347,12 @@ app.delete("/api/admin/materials/:section/:filename", requireAdmin, (req, res) =
 
 });
     const section = String(req.params.section || "").toLowerCase();
-    const allowed = ["ba","ma","upsc","uppcs","net-jrf","railway","ssc","banking"];
+    const allowed = ["ba","ma","upsc","uppcs","net-jrf","railway","ssc","banking","teaching",
+      "armed-forces",
+      "railway-exams",
+      "banking-exams",
+      "state-psc",
+      "civil-defence","research","engineering","medical","university-law","up-government","insurance","law-professional","police-defence"];
     if (!allowed.includes(section)) {
       return res.status(400).json({ success:false, message:"Invalid section" });
     }
@@ -534,6 +567,34 @@ app.post(
 
       }
 
+
+      // ===============================
+      // CHECK ALREADY REGISTERED USER
+      // ===============================
+
+      const users =
+        JSON.parse(
+          fs.readFileSync(
+            usersFile,
+            "utf8"
+          )
+        );
+
+      const alreadyExists =
+        users.find(
+          user =>
+            user.email.toLowerCase() === email.toLowerCase()
+            ||
+            user.mobile === mobile
+        );
+
+      if (alreadyExists) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "इस Email या Mobile से account पहले से मौजूद है।"
+        });
+      }
 
       // 6 digit temporary OTP
       const otp =
