@@ -1052,6 +1052,25 @@ app.post(
 );
 
 
+// STUDENT SESSION CHECK
+app.get("/api/student/session", (req, res) => {
+  const token = req.cookies.studentSession;
+
+  if (!token || !studentSessions.has(token)) {
+    return res.status(401).json({
+      success: false,
+      loggedIn: false
+    });
+  }
+
+  res.json({
+    success: true,
+    loggedIn: true,
+    user: studentSessions.get(token)
+  });
+});
+
+
 // ===============================
 // STUDENT LOGOUT
 // ===============================
