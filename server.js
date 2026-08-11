@@ -39,7 +39,20 @@ function generateStudentSession() {
 }
 
 function requireStudent(req, res, next) {
-  const token = req.cookies.studentSession;
+
+  const auth =
+    req.headers.authorization || "";
+
+  let token = "";
+
+  if (auth.startsWith("Bearer ")) {
+    token = auth.substring(7);
+  }
+
+  if (!token) {
+    token =
+      req.cookies.studentSession || "";
+  }
 
   if (!token || !studentSessions.has(token)) {
     return res.status(401).json({
@@ -48,7 +61,9 @@ function requireStudent(req, res, next) {
     });
   }
 
-  req.student = studentSessions.get(token);
+  req.student =
+    studentSessions.get(token);
+
   next();
 }
 
@@ -1016,6 +1031,8 @@ app.post(
 
         message:
           "Login successful.",
+
+        studentSession,
 
         user: {
 
