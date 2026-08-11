@@ -1071,7 +1071,20 @@ app.post(
 
 // STUDENT SESSION CHECK
 app.get("/api/student/session", (req, res) => {
-  const token = req.cookies.studentSession;
+
+  const auth =
+    req.headers.authorization || "";
+
+  let token = "";
+
+  if (auth.startsWith("Bearer ")) {
+    token = auth.substring(7);
+  }
+
+  if (!token) {
+    token =
+      req.cookies.studentSession || "";
+  }
 
   if (!token || !studentSessions.has(token)) {
     return res.status(401).json({
