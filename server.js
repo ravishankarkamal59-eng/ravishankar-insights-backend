@@ -4,6 +4,7 @@ const cors = require("cors");
 const fs = require("fs");
 const path = require("path");
 const multer = require("multer");
+const cookieParser = require("cookie-parser");
 const { Pool } = require("pg");
 
 const pool = new Pool({
@@ -15,8 +16,12 @@ const TWOFACTOR_API_KEY = process.env.TWOFACTOR_API_KEY;
 const TWOFACTOR_TEMPLATE_NAME = process.env.TWOFACTOR_TEMPLATE_NAME;
 const app = express();
 
-app.use(cors());
+app.use(cors({
+  origin: true,
+  credentials: true
+}));
 app.use(express.json());
+app.use(cookieParser());
 
 
 // ===============================
@@ -25,6 +30,28 @@ app.use(express.json());
 
 const crypto = require("crypto");
 const adminTokens = new Set();
+
+// STUDENT SESSION AUTHENTICATION
+const studentSessions = new Map();
+
+function generateStudentSession() {
+  return crypto.randomBytes(32).toString("hex");
+}
+
+function requireStudent(req, res, next) {
+  const token = req.cookies.studentSession;
+
+  if (!token || !studentSessions.has(token)) {
+    return res.status(401).json({
+      success: false,
+      message: "Student login required."
+    });
+  }
+
+  req.student = studentSessions.get(token);
+  next();
+}
+
 
 function generateAdminToken() {
   return crypto.randomBytes(32).toString("hex");
@@ -169,6 +196,7 @@ const upload = multer({
 
 app.use(
   "/uploads",
+  requireStudent,
   express.static(uploadsDir)
 );
 
@@ -957,6 +985,31 @@ app.post(
 
       }
 
+      const studentSession =
+        generateStudentSession();
+
+      studentSessions.set(
+        studentSession,
+        {
+          id: user.id,
+          name: user.name,
+          mobile: user.mobile,
+          email: user.email
+        }
+      );
+
+      res.cookie(
+        "studentSession",
+        studentSession,
+        {
+          httpOnly: true,
+          secure: true,
+          sameSite: "none",
+          maxAge: 24 * 60 * 60 * 1000,
+          path: "/"
+        }
+      );
+
       res.json({
 
         success: true,
@@ -997,6 +1050,31 @@ app.post(
 
   }
 );
+
+
+// ===============================
+// STUDENT LOGOUT
+// ===============================
+
+app.post("/api/student/logout", (req, res) => {
+  const token = req.cookies.studentSession;
+
+  if (token) {
+    studentSessions.delete(token);
+  }
+
+  res.clearCookie("studentSession", {
+    httpOnly: true,
+    secure: true,
+    sameSite: "none",
+    path: "/"
+  });
+
+  res.json({
+    success: true,
+    message: "Logout successful."
+  });
+});
 
 
 // ===============================
