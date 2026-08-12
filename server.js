@@ -120,6 +120,158 @@ app.post("/api/admin/login", (req, res) => {
 
 
 // ===============================
+// ADMIN CARD SYSTEM
+// ===============================
+
+const cardsFile = path.join(__dirname, "cards.json");
+
+if (!fs.existsSync(cardsFile)) {
+  fs.writeFileSync(cardsFile, "[]");
+}
+
+app.get("/api/cards", (req, res) => {
+
+  try {
+
+    const cards =
+      JSON.parse(
+        fs.readFileSync(cardsFile, "utf8")
+      );
+
+    res.json({
+      success: true,
+      cards
+    });
+
+  } catch (error) {
+
+    console.error(error);
+
+    res.status(500).json({
+      success: false,
+      message: "Cards load नहीं हो पाए।"
+    });
+
+  }
+
+});
+
+app.post("/api/admin/cards", requireAdmin, (req, res) => {
+
+  try {
+
+    const {
+      title,
+      icon,
+      description,
+      section,
+      page
+    } = req.body;
+
+    if (!title || !section || !page) {
+
+      return res.status(400).json({
+        success: false,
+        message: "Title, section और page जरूरी हैं।"
+      });
+
+    }
+
+    const cards =
+      JSON.parse(
+        fs.readFileSync(cardsFile, "utf8")
+      );
+
+    const newCard = {
+      id: crypto.randomBytes(8).toString("hex"),
+      title: String(title).trim(),
+      icon: String(icon || "📚").trim(),
+      description: String(description || "").trim(),
+      section: String(section).trim().toLowerCase(),
+      page: String(page).trim(),
+      createdAt: new Date().toISOString()
+    };
+
+    cards.push(newCard);
+
+    fs.writeFileSync(
+      cardsFile,
+      JSON.stringify(cards, null, 2)
+    );
+
+    res.json({
+      success: true,
+      message: "New card successfully added.",
+      card: newCard
+    });
+
+  } catch (error) {
+
+    console.error(error);
+
+    res.status(500).json({
+      success: false,
+      message: "Card save नहीं हो पाया।"
+    });
+
+  }
+
+});
+
+app.delete(
+  "/api/admin/cards/:id",
+  requireAdmin,
+  (req, res) => {
+
+    try {
+
+      const cards =
+        JSON.parse(
+          fs.readFileSync(cardsFile, "utf8")
+        );
+
+      const oldLength = cards.length;
+
+      const updated =
+        cards.filter(
+          card => card.id !== req.params.id
+        );
+
+      if (updated.length === oldLength) {
+
+        return res.status(404).json({
+          success: false,
+          message: "Card नहीं मिला।"
+        });
+
+      }
+
+      fs.writeFileSync(
+        cardsFile,
+        JSON.stringify(updated, null, 2)
+      );
+
+      res.json({
+        success: true,
+        message: "Card deleted successfully."
+      });
+
+    } catch (error) {
+
+      console.error(error);
+
+      res.status(500).json({
+        success: false,
+        message: "Card delete नहीं हो पाया।"
+      });
+
+    }
+
+  }
+);
+
+
+// ===============================
 // PDF + VIDEO UPLOAD SYSTEM
 // ===============================
 
