@@ -376,41 +376,88 @@ app.post(
     try {
 
       if (!req.file) {
-
         return res.status(400).json({
           success: false,
           message: "File select करें।"
         });
-
       }
 
       const section =
         String(req.body.section || "")
-          .toLowerCase();
+          .toLowerCase()
+          .trim();
+
+      const card =
+        String(req.body.card || "")
+          .trim();
+
+      const materialType =
+        String(req.body.materialType || "notes")
+          .toLowerCase()
+          .trim();
+
+      const allowedTypes = [
+        "pyq",
+        "notes",
+        "syllabus"
+      ];
+
+      if (!card) {
+        return res.status(400).json({
+          success: false,
+          message: "Card जरूरी है।"
+        });
+      }
+
+      if (!allowedTypes.includes(materialType)) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid material type."
+        });
+      }
+
+      const materialsFile =
+        path.join(__dirname, "materials.json");
+
+      let materials = [];
+
+      if (fs.existsSync(materialsFile)) {
+        try {
+          materials = JSON.parse(
+            fs.readFileSync(materialsFile, "utf8")
+          );
+        } catch {
+          materials = [];
+        }
+      }
+
+      const material = {
+        id: crypto.randomBytes(8).toString("hex"),
+        card: card,
+        section: section,
+        type: materialType,
+        name: req.file.originalname,
+        filename: req.file.filename,
+        mimetype: req.file.mimetype,
+        url:
+          "/uploads/" +
+          section +
+          "/" +
+          req.file.filename,
+        createdAt: new Date().toISOString()
+      };
+
+      materials.push(material);
+
+      fs.writeFileSync(
+        materialsFile,
+        JSON.stringify(materials, null, 2)
+      );
 
       res.json({
-
         success: true,
-
-        message:
-          "File successfully upload हो गई।",
-
-        section: section,
-
-        file: {
-
-          name: req.file.originalname,
-
-          type: req.file.mimetype,
-
-          url:
-            "/uploads/" +
-            section +
-            "/" +
-            req.file.filename
-
-        }
-
+        message: "File successfully upload हो गई।",
+        material: material
       });
 
     } catch (error) {
@@ -418,18 +465,16 @@ app.post(
       console.error(error);
 
       res.status(500).json({
-
         success: false,
-
-        message:
-          "File upload नहीं हो पाया।"
-
+        message: "File upload नहीं हो पाया।"
       });
 
     }
 
   }
 );
+
+
 const PORT = process.env.PORT || 5000;
 
 const articlesFile =
@@ -543,6 +588,87 @@ app.get("/api/materials/:section", (req, res) => {
 
 });
 
+
+
+// ===============================
+// CARD MATERIALS GET
+// ===============================
+
+app.get("/api/card-materials", requireStudent, (req, res) => {
+
+  try {
+
+    const card = String(req.query.card || "").trim();
+    const type = String(req.query.type || "").toLowerCase().trim();
+
+    if (!card) {
+      return res.status(400).json({
+        success: false,
+        message: "Card जरूरी है।"
+      });
+    }
+
+    const allowedTypes = [
+      "pyq",
+      "notes",
+      "syllabus"
+    ];
+
+    if (type && !allowedTypes.includes(type)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid material type."
+      });
+    }
+
+    const materialsFile =
+      path.join(__dirname, "materials.json");
+
+    let materials = [];
+
+    if (fs.existsSync(materialsFile)) {
+      try {
+        materials =
+          JSON.parse(
+            fs.readFileSync(materialsFile, "utf8")
+          );
+      } catch {
+        materials = [];
+      }
+    }
+
+    const matched =
+      materials.filter(material => {
+
+        const sameCard =
+          String(material.card || "").trim() === card;
+
+        const sameType =
+          !type ||
+          String(material.type || "").toLowerCase() === type;
+
+        return sameCard && sameType;
+      });
+
+    res.json({
+      success: true,
+      card,
+      type: type || null,
+      materials: matched
+    });
+
+  } catch (error) {
+
+    console.error(error);
+
+    res.status(500).json({
+      success: false,
+      message: "Card materials load नहीं हो पाए।"
+    });
+
+  }
+
+});
 
 // ===============================
 // ADMIN DELETE MATERIAL
