@@ -37,7 +37,7 @@ const adminTokens = new Set();
 
 const adminLoginAttempts = new Map();
 
-const MAX_ADMIN_LOGIN_ATTEMPTS = 5;
+const MAX_ADMIN_LOGIN_ATTEMPTS = 3;
 const ADMIN_LOCKOUT_MS = 15 * 60 * 1000;
 
 // Render/proxy के पीछे सही client IP लेने के लिए
@@ -191,7 +191,7 @@ app.post("/api/admin/login", (req, res) => {
       return res.status(429).json({
         success: false,
         message:
-          "5 गलत login attempts हो चुके हैं। Admin login 15 मिनट के लिए block कर दिया गया है।"
+          "3 गलत login attempts हो चुके हैं। Admin login 15 मिनट के लिए block कर दिया गया है।"
       });
     }
 
