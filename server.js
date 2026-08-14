@@ -31,6 +31,67 @@ app.use(cookieParser());
 const crypto = require("crypto");
 const adminTokens = new Set();
 
+// ===============================
+// ADMIN LOGIN ATTEMPT PROTECTION
+// ===============================
+
+const adminLoginAttempts = new Map();
+
+const MAX_ADMIN_LOGIN_ATTEMPTS = 5;
+const ADMIN_LOCKOUT_MS = 15 * 60 * 1000;
+
+// Render/proxy के पीछे सही client IP लेने के लिए
+app.set("trust proxy", 1);
+
+function getClientIp(req) {
+  return req.ip || "unknown";
+}
+
+function isAdminLoginBlocked(ip) {
+  const record = adminLoginAttempts.get(ip);
+
+  if (!record) {
+    return false;
+  }
+
+  if (record.lockedUntil > Date.now()) {
+    return true;
+  }
+
+  if (record.lockedUntil) {
+    adminLoginAttempts.delete(ip);
+  }
+
+  return false;
+}
+
+function recordFailedAdminLogin(ip) {
+  const now = Date.now();
+
+  let record = adminLoginAttempts.get(ip);
+
+  if (!record || (record.lockedUntil && record.lockedUntil <= now)) {
+    record = {
+      attempts: 0,
+      lockedUntil: 0
+    };
+  }
+
+  record.attempts += 1;
+
+  if (record.attempts >= MAX_ADMIN_LOGIN_ATTEMPTS) {
+    record.lockedUntil = now + ADMIN_LOCKOUT_MS;
+  }
+
+  adminLoginAttempts.set(ip, record);
+
+  return record;
+}
+
+function clearAdminLoginAttempts(ip) {
+  adminLoginAttempts.delete(ip);
+}
+
 // STUDENT SESSION AUTHENTICATION
 const studentSessions = new Map();
 
@@ -95,17 +156,57 @@ function requireAdmin(req, res, next) {
 }
 
 app.post("/api/admin/login", (req, res) => {
+  const ip = getClientIp(req);
   const { username, password } = req.body;
+
+  // ===============================
+  // ADMIN LOGIN LOCK CHECK
+  // ===============================
+
+  if (isAdminLoginBlocked(ip)) {
+    const record = adminLoginAttempts.get(ip);
+
+    const remainingMinutes = Math.ceil(
+      (record.lockedUntil - Date.now()) / 60000
+    );
+
+    return res.status(429).json({
+      success: false,
+      message:
+        `बहुत ज्यादा गलत प्रयास हुए हैं। कृपया लगभग ${remainingMinutes} मिनट बाद फिर प्रयास करें।`
+    });
+  }
+
+  // ===============================
+  // ADMIN CREDENTIAL CHECK
+  // ===============================
 
   if (
     username !== process.env.ADMIN_USERNAME ||
     password !== process.env.ADMIN_PASSWORD
   ) {
+    const record = recordFailedAdminLogin(ip);
+
+    if (record.lockedUntil > Date.now()) {
+      return res.status(429).json({
+        success: false,
+        message:
+          "5 गलत login attempts हो चुके हैं। Admin login 15 मिनट के लिए block कर दिया गया है।"
+      });
+    }
+
+    const remainingAttempts =
+      MAX_ADMIN_LOGIN_ATTEMPTS - record.attempts;
+
     return res.status(401).json({
       success: false,
-      message: "Username या Password गलत है।"
+      message:
+        `Username या Password गलत है। ${remainingAttempts} attempt बाकी हैं।`
     });
   }
+
+  // सही login होने पर failed attempts reset
+  clearAdminLoginAttempts(ip);
 
   const token = generateAdminToken();
   adminTokens.add(token);
