@@ -497,6 +497,14 @@ app.post(
           .toLowerCase()
           .trim();
 
+      const paper =
+        String(req.body.paper || "")
+          .trim();
+
+      const subject =
+        String(req.body.subject || "")
+          .trim();
+
       const allowedTypes = [
         "pyq",
         "notes",
@@ -536,6 +544,8 @@ app.post(
         id: crypto.randomBytes(8).toString("hex"),
         card: card,
         section: section,
+        subject: subject,
+        paper: paper,
         type: materialType,
         name: req.file.originalname,
         filename: req.file.filename,
@@ -701,6 +711,8 @@ app.get("/api/card-materials", requireStudent, (req, res) => {
 
     const card = String(req.query.card || "").trim();
     const type = String(req.query.type || "").toLowerCase().trim();
+    const paper = String(req.query.paper || "").trim();
+    const subject = String(req.query.subject || "").trim();
 
     if (!card) {
       return res.status(400).json({
@@ -748,13 +760,23 @@ app.get("/api/card-materials", requireStudent, (req, res) => {
           !type ||
           String(material.type || "").toLowerCase() === type;
 
-        return sameCard && sameType;
+        const samePaper =
+          !paper ||
+          String(material.paper || "").trim() === paper;
+
+        const sameSubject =
+          !subject ||
+          String(material.subject || "").trim() === subject;
+
+        return sameCard && sameType && samePaper && sameSubject;
       });
 
     res.json({
       success: true,
       card,
       type: type || null,
+      paper: paper || null,
+      subject: subject || null,
       materials: matched
     });
 
