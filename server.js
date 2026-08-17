@@ -508,7 +508,8 @@ app.post(
       const allowedTypes = [
         "pyq",
         "notes",
-        "syllabus"
+        "syllabus",
+        "book"
       ];
 
       if (!card) {
@@ -724,7 +725,8 @@ app.get("/api/card-materials", requireStudent, (req, res) => {
     const allowedTypes = [
       "pyq",
       "notes",
-      "syllabus"
+      "syllabus",
+      "book"
     ];
 
     if (type && !allowedTypes.includes(type)) {
@@ -865,6 +867,38 @@ app.delete(
       }
 
       fs.unlinkSync(filePath);
+
+      // Remove deleted file from materials.json
+      const materialsFile = path.join(__dirname, "materials.json");
+
+      if (fs.existsSync(materialsFile)) {
+        try {
+          let materials = JSON.parse(
+            fs.readFileSync(materialsFile, "utf8")
+          );
+
+          const beforeCount = materials.length;
+
+          materials = materials.filter(material => {
+            return !(
+              String(material.section || "").toLowerCase() === section &&
+              String(material.filename || "") === filename
+            );
+          });
+
+          if (materials.length !== beforeCount) {
+            fs.writeFileSync(
+              materialsFile,
+              JSON.stringify(materials, null, 2)
+            );
+          }
+        } catch (jsonError) {
+          console.error(
+            "materials.json update error:",
+            jsonError
+          );
+        }
+      }
 
       res.json({
         success: true,
