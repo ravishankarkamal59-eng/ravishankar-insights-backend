@@ -5,3 +5,9 @@ users.json
 server-backup.js
 server-before-*.js
 sms-test.js
+
+# Local backup files
+*.backup
+*.before-*
+*.SAFE-BACKUP-*
+.env.before-*
