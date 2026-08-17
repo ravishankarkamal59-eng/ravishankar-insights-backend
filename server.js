@@ -506,6 +506,7 @@ app.post(
           .trim();
 
       const allowedTypes = [
+        "pdf",
         "pyq",
         "notes",
         "syllabus",
@@ -723,6 +724,7 @@ app.get("/api/card-materials", requireStudent, (req, res) => {
     }
 
     const allowedTypes = [
+      "pdf",
       "pyq",
       "notes",
       "syllabus",
