@@ -443,22 +443,40 @@ const upload = multer({
 
   fileFilter: (req, file, cb) => {
 
-    const allowed = [
+    const allowedMimeTypes = [
       "application/pdf",
       "video/mp4",
       "video/webm",
-      "video/quicktime"
+      "video/quicktime",
+      "application/octet-stream"
     ];
 
-    if (allowed.includes(file.mimetype)) {
-      cb(null, true);
-    } else {
-      cb(
-        new Error(
-          "Only PDF and video files are allowed."
-        )
-      );
+    const filename =
+      String(file.originalname || "").toLowerCase();
+
+    const allowedExtension =
+      filename.endsWith(".pdf") ||
+      filename.endsWith(".mp4") ||
+      filename.endsWith(".webm") ||
+      filename.endsWith(".mov") ||
+      filename.endsWith(".m4v");
+
+    if (
+      allowedMimeTypes.includes(file.mimetype) &&
+      allowedExtension
+    ) {
+      return cb(null, true);
     }
+
+    if (allowedExtension) {
+      return cb(null, true);
+    }
+
+    cb(
+      new Error(
+        "Only PDF and video files are allowed."
+      )
+    );
   }
 });
 
@@ -467,6 +485,36 @@ app.use(
   requireStudent,
   express.static(uploadsDir)
 );
+
+// ===============================
+// UPLOAD / MULTER ERROR HANDLER
+// ===============================
+
+app.use((err, req, res, next) => {
+
+  if (err) {
+
+    console.error(
+      "UPLOAD MIDDLEWARE ERROR:",
+      err
+    );
+
+    if (
+      req.path === "/api/admin/upload" ||
+      req.originalUrl.startsWith("/api/admin/upload")
+    ) {
+
+      return res.status(400).json({
+        success: false,
+        message:
+          err.message ||
+          "File upload failed."
+      });
+    }
+  }
+
+  next(err);
+});
 
 app.post(
   "/api/admin/upload",
