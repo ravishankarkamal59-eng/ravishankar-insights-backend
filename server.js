@@ -575,11 +575,12 @@ app.post(
 
     } catch (error) {
 
-      console.error(error);
+      console.error("UPLOAD ROUTE ERROR:", error);
 
       res.status(500).json({
         success: false,
-        message: "File upload नहीं हो पाया।"
+        message: "File upload नहीं हो पाया।",
+        error: error.message || String(error)
       });
 
     }
