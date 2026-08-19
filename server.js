@@ -519,7 +519,31 @@ app.use((err, req, res, next) => {
 app.post(
   "/api/admin/upload",
   requireAdmin,
-  upload.single("file"),
+
+  (req, res, next) => {
+
+    upload.single("file")(req, res, (error) => {
+
+      if (error) {
+
+        console.error(
+          "MULTER UPLOAD ERROR:",
+          error
+        );
+
+        return res.status(500).json({
+          success: false,
+          message:
+            error.message ||
+            "File upload middleware error."
+        });
+      }
+
+      next();
+    });
+
+  },
+
   (req, res) => {
 
     try {
