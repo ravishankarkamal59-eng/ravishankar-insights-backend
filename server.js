@@ -858,7 +858,7 @@ app.get("/api/materials/:section", (req, res) => {
 // CARD MATERIALS GET
 // ===============================
 
-app.get("/api/card-materials", requireStudent, (req, res) => {
+app.get("/api/card-materials", (req, res) => {
 
   try {
 
