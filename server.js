@@ -414,9 +414,39 @@ const storage = multer.diskStorage({
       return cb(new Error("Invalid section"));
     }
 
-    const folder = path.join(uploadsDir, section);
+    // ==========================================
+    // SECTION + SUBJECT + PAPER FOLDER
+    // ==========================================
+
+    const subject =
+      String(req.body.subject || "general")
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-+|-+$/g, "") ||
+      "general";
+
+    const paper =
+      String(req.body.paper || "general")
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-+|-+$/g, "") ||
+      "general";
+
+    const folder = path.join(
+      uploadsDir,
+      section,
+      subject,
+      paper
+    );
 
     fs.mkdirSync(folder, { recursive: true });
+
+    // Save relative folder for the upload route
+    req.uploadSection = section;
+    req.uploadSubject = subject;
+    req.uploadPaper = paper;
 
     cb(null, folder);
   },
@@ -628,6 +658,10 @@ app.post(
           "/uploads/" +
           section +
           "/" +
+          (req.uploadSubject || "general") +
+          "/" +
+          (req.uploadPaper || "general") +
+          "/" +
           req.file.filename,
         createdAt: new Date().toISOString()
       };
@@ -746,14 +780,58 @@ app.get("/api/materials/:section", (req, res) => {
       });
     }
 
-    const files = fs.readdirSync(folder).map(name => ({
-      name,
-      url:
-        "/uploads/" +
-        section +
-        "/" +
-        encodeURIComponent(name)
-    }));
+    // ==========================================
+    // RECURSIVE MATERIALS LIST
+    // Section → Subject → Paper → File
+    // ==========================================
+
+    const files = [];
+
+    function scanMaterials(currentFolder, relativeFolder = "") {
+
+      const entries = fs.readdirSync(currentFolder, {
+        withFileTypes: true
+      });
+
+      for (const entry of entries) {
+
+        const fullPath =
+          path.join(currentFolder, entry.name);
+
+        const relativePath =
+          relativeFolder
+            ? path.join(relativeFolder, entry.name)
+            : entry.name;
+
+        if (entry.isDirectory()) {
+
+          scanMaterials(
+            fullPath,
+            relativePath
+          );
+
+        } else {
+
+          files.push({
+            name: entry.name,
+            path: relativePath.replace(/\\/g, "/"),
+            url:
+              "/uploads/" +
+              section +
+              "/" +
+              relativePath
+                .split(path.sep)
+                .map(part =>
+                  encodeURIComponent(part)
+                )
+                .join("/")
+          });
+
+        }
+      }
+    }
+
+    scanMaterials(folder);
 
     res.json({
       success: true,
