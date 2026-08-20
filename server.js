@@ -612,7 +612,8 @@ app.post(
         "pyq",
         "notes",
         "syllabus",
-        "book"
+        "book",
+        "video"
       ];
 
       if (!card) {
@@ -879,7 +880,8 @@ app.get("/api/card-materials", (req, res) => {
       "pyq",
       "notes",
       "syllabus",
-      "book"
+      "book",
+      "video"
     ];
 
     if (type && !allowedTypes.includes(type)) {
