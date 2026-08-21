@@ -670,9 +670,9 @@ app.post(
           "/uploads/" +
           section +
           "/" +
-          (subject || "general") +
+          (req.uploadSubject || "general") +
           "/" +
-          (paper || "general") +
+          (req.uploadPaper || "general") +
           "/" +
           req.file.filename,
         createdAt: new Date().toISOString()
