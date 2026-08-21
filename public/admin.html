@@ -200,7 +200,7 @@ button:hover{opacity:.9}
         accept=".pdf,application/pdf,video/*"
       >
 
-      <button onclick="uploadPDF()">📤 Upload Material</button>
+      <button onclick="alert('BUTTON CLICKED'); uploadPDF()">📤 Upload Material</button>
 
       <div id="uploadMessage"></div>
     </div>
@@ -411,6 +411,8 @@ async function saveArticle(){
 
 
 async function uploadPDF(){
+
+  console.log("UPLOAD BUTTON CLICKED");
 
   const fileInput =
     document.getElementById("pdfFile");
