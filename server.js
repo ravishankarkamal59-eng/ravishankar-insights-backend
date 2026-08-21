@@ -599,6 +599,10 @@ app.post(
           .toLowerCase()
           .trim();
 
+      const semester =
+        String(req.body.semester || "")
+          .trim();
+
       const paper =
         String(req.body.paper || "")
           .trim();
@@ -650,6 +654,7 @@ app.post(
         card: card,
         section: section,
         subject: subject,
+        semester: semester,
         paper: paper,
         type: materialType,
         name: req.file.originalname,
@@ -865,6 +870,7 @@ app.get("/api/card-materials", (req, res) => {
 
     const card = String(req.query.card || "").trim();
     const type = String(req.query.type || "").toLowerCase().trim();
+    const semester = String(req.query.semester || "").trim();
     const paper = String(req.query.paper || "").trim();
     const subject = String(req.query.subject || "").trim();
 
@@ -917,6 +923,10 @@ app.get("/api/card-materials", (req, res) => {
           !type ||
           String(material.type || "").toLowerCase() === type;
 
+        const sameSemester =
+          !semester ||
+          String(material.semester || "").trim() === semester;
+
         const samePaper =
           !paper ||
           String(material.paper || "").trim() === paper;
@@ -925,13 +935,18 @@ app.get("/api/card-materials", (req, res) => {
           !subject ||
           String(material.subject || "").trim() === subject;
 
-        return sameCard && sameType && samePaper && sameSubject;
+        return sameCard &&
+          sameType &&
+          sameSemester &&
+          samePaper &&
+          sameSubject;
       });
 
     res.json({
       success: true,
       card,
       type: type || null,
+      semester: semester || null,
       paper: paper || null,
       subject: subject || null,
       materials: matched
