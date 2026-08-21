@@ -519,7 +519,6 @@ const upload = multer({
 
 app.use(
   "/uploads",
-  requireStudent,
   express.static(uploadsDir)
 );
 
