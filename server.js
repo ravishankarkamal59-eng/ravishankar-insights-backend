@@ -115,6 +115,13 @@ function requireStudent(req, res, next) {
       req.cookies.studentSession || "";
   }
 
+  // Compatibility: allow student session from material link
+  // when direct PDF/video navigation does not send the cookie.
+  if (!token) {
+    token =
+      String(req.query.studentSession || "").trim();
+  }
+
   if (!token || !studentSessions.has(token)) {
     return res.status(401).json({
       success: false,
