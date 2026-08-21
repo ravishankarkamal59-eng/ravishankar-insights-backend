@@ -154,13 +154,53 @@ button:hover{opacity:.9}
         <option value="banking">Banking</option>
       </select>
 
+      <label>Card</label>
+      <input
+        type="text"
+        id="card"
+        placeholder="Example: BA Political Science"
+      >
+
+      <label>Material Type</label>
+      <select id="materialType">
+        <option value="pdf">PDF</option>
+        <option value="notes">Notes</option>
+        <option value="pyq">PYQ</option>
+        <option value="syllabus">Syllabus</option>
+        <option value="book">Book</option>
+        <option value="video">Video</option>
+      </select>
+
+      <label>Semester</label>
+      <input
+        type="text"
+        id="semester"
+        placeholder="Example: Semester 1"
+      >
+
+      <label>Paper</label>
+      <input
+        type="text"
+        id="paper"
+        placeholder="Example: Paper 1"
+      >
+
+      <label>Subject</label>
+      <input
+        type="text"
+        id="subject"
+        placeholder="Example: Political Science"
+      >
+
+      <label>PDF / Video File</label>
+
       <input
         type="file"
         id="pdfFile"
-        accept=".pdf,application/pdf"
+        accept=".pdf,application/pdf,video/*"
       >
 
-      <button onclick="uploadPDF()">📤 Upload PDF</button>
+      <button onclick="uploadPDF()">📤 Upload Material</button>
 
       <div id="uploadMessage"></div>
     </div>
@@ -378,38 +418,57 @@ async function uploadPDF(){
   const section =
     document.getElementById("section").value;
 
+  const card =
+    document.getElementById("card").value.trim();
+
+  const materialType =
+    document.getElementById("materialType").value;
+
+  const semester =
+    document.getElementById("semester").value.trim();
+
+  const paper =
+    document.getElementById("paper").value.trim();
+
+  const subject =
+    document.getElementById("subject").value.trim();
+
   const message =
     document.getElementById("uploadMessage");
 
   if(!token){
-
     message.textContent =
       "❌ पहले Admin Login करें।";
+    return;
+  }
 
+  if(!card){
+    message.textContent =
+      "❌ Card जरूरी है।";
     return;
   }
 
   if(!fileInput.files.length){
-
     message.textContent =
-      "पहले PDF select करें।";
-
+      "❌ पहले file select करें।";
     return;
-
   }
 
-  const formData =
-    new FormData();
+  message.textContent =
+    "⏳ Upload हो रहा है...";
 
-  formData.append(
-    "section",
-    section
-  );
+  const formData = new FormData();
 
-  formData.append(
-    "file",
-    fileInput.files[0]
-  );
+  // IMPORTANT:
+  // All metadata is added BEFORE the file.
+  // This allows multer destination() to read req.body.
+  formData.append("section", section);
+  formData.append("card", card);
+  formData.append("materialType", materialType);
+  formData.append("semester", semester);
+  formData.append("paper", paper);
+  formData.append("subject", subject);
+  formData.append("file", fileInput.files[0]);
 
   try{
 
@@ -434,27 +493,28 @@ async function uploadPDF(){
     if(data.success){
 
       message.textContent =
-        "✅ PDF successfully upload हो गई: " +
-        data.file.name;
+        "✅ Material successfully upload हो गया: " +
+        (data.material?.name || "File");
 
       fileInput.value="";
 
     }else{
 
       message.textContent =
-        "❌ " + data.message;
+        "❌ " +
+        (data.message || "Upload failed.");
 
     }
 
   }catch(error){
 
+    console.error(error);
+
     message.textContent =
       "❌ Upload failed.";
 
   }
-
 }
-
 
 
 async function loadMaterials(){
