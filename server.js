@@ -824,20 +824,47 @@ app.get("/api/materials/:section", (req, res) => {
 
         } else {
 
-          files.push({
-            name: entry.name,
-            path: relativePath.replace(/\\/g, "/"),
-            url:
-              "/uploads/" +
-              section +
-              "/" +
-              relativePath
-                .split(path.sep)
-                .map(part =>
-                  encodeURIComponent(part)
-                )
-                .join("/")
-          });
+          const normalizedParts = relativePath
+.replace(/\\/g, "/")
+              .split("/")
+              .filter(Boolean);
+
+            const paperPart = normalizedParts.length >= 2
+              ? normalizedParts[normalizedParts.length - 2]
+              : "";
+
+            const subjectPart = normalizedParts.length >= 3
+              ? normalizedParts[normalizedParts.length - 3]
+              : "";
+
+            const toTitle = (value) =>
+              value.replace(/-/g, " ")
+                .replace(/\b\w/g, c => c.toUpperCase());
+
+            const paper = toTitle(paperPart);
+            const subject = toTitle(subjectPart);
+
+            const ext = path.extname(entry.name).toLowerCase();
+
+            const materialType =
+              ext === ".pdf" ? "pdf" :
+              [".mp4", ".webm", ".mov", ".mkv"].includes(ext) ? "video" :
+              "notes";
+
+            files.push({
+              name: entry.name,
+              path: relativePath.replace(/\\/g, "/"),
+              paper,
+              subject,
+              materialType,
+              url:
+                "/uploads/" +
+                section +
+                "/" +
+                normalizedParts
+                  .map(part => encodeURIComponent(part))
+                  .join("/")
+            });
 
         }
       }
