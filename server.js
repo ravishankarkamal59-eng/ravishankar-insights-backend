@@ -3,711 +3,15 @@ const express = require("express");
 const cors = require("cors");
 const fs = require("fs");
 const path = require("path");
-const multer = require("multer");
-const cookieParser = require("cookie-parser");
-const { Pool } = require("pg");
-
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  ssl: { rejectUnauthorized: false }
-});
-
 const TWOFACTOR_API_KEY = process.env.TWOFACTOR_API_KEY;
 const TWOFACTOR_TEMPLATE_NAME = process.env.TWOFACTOR_TEMPLATE_NAME;
+const { askRavishankarAI } = require("./ai");
 const app = express();
 
-app.use(cors({
-  origin: true,
-  credentials: true
-}));
+app.use(cors());
 app.use(express.json());
-app.use(cookieParser());
 
-
-// ===============================
-// ADMIN AUTHENTICATION
-// ===============================
-
-const crypto = require("crypto");
-const adminTokens = new Set();
-
-// ===============================
-// ADMIN LOGIN ATTEMPT PROTECTION
-// ===============================
-
-const adminLoginAttempts = new Map();
-
-const MAX_ADMIN_LOGIN_ATTEMPTS = 3;
-const ADMIN_LOCKOUT_MS = 15 * 60 * 1000;
-
-// Render/proxy के पीछे सही client IP लेने के लिए
-app.set("trust proxy", 1);
-
-function getClientIp(req) {
-  return req.ip || "unknown";
-}
-
-function isAdminLoginBlocked(ip) {
-  const record = adminLoginAttempts.get(ip);
-
-  if (!record) {
-    return false;
-  }
-
-  if (record.lockedUntil > Date.now()) {
-    return true;
-  }
-
-  if (record.lockedUntil) {
-    adminLoginAttempts.delete(ip);
-  }
-
-  return false;
-}
-
-function recordFailedAdminLogin(ip) {
-  const now = Date.now();
-
-  let record = adminLoginAttempts.get(ip);
-
-  if (!record || (record.lockedUntil && record.lockedUntil <= now)) {
-    record = {
-      attempts: 0,
-      lockedUntil: 0
-    };
-  }
-
-  record.attempts += 1;
-
-  if (record.attempts >= MAX_ADMIN_LOGIN_ATTEMPTS) {
-    record.lockedUntil = now + ADMIN_LOCKOUT_MS;
-  }
-
-  adminLoginAttempts.set(ip, record);
-
-  return record;
-}
-
-function clearAdminLoginAttempts(ip) {
-  adminLoginAttempts.delete(ip);
-}
-
-// STUDENT SESSION AUTHENTICATION
-const studentSessions = new Map();
-
-function generateStudentSession() {
-  return crypto.randomBytes(32).toString("hex");
-}
-
-function requireStudent(req, res, next) {
-
-  const auth =
-    req.headers.authorization || "";
-
-  let token = "";
-
-  if (auth.startsWith("Bearer ")) {
-    token = auth.substring(7);
-  }
-
-  if (!token) {
-    token =
-      req.cookies.studentSession || "";
-  }
-
-  // Compatibility: allow student session from material link
-  // when direct PDF/video navigation does not send the cookie.
-  if (!token) {
-    token =
-      String(req.query.studentSession || "").trim();
-  }
-
-  if (!token || !studentSessions.has(token)) {
-    return res.status(401).json({
-      success: false,
-      message: "Student login required."
-    });
-  }
-
-  req.student =
-    studentSessions.get(token);
-
-  next();
-}
-
-
-function generateAdminToken() {
-  return crypto.randomBytes(32).toString("hex");
-}
-
-function requireAdmin(req, res, next) {
-  const auth = req.headers.authorization || "";
-
-  if (!auth.startsWith("Bearer ")) {
-    return res.status(401).json({
-      success: false,
-      message: "Admin login required."
-    });
-  }
-
-  const token = auth.substring(7);
-
-  if (!adminTokens.has(token)) {
-    return res.status(401).json({
-      success: false,
-      message: "Invalid admin token."
-    });
-  }
-
-  next();
-}
-
-app.post("/api/admin/login", (req, res) => {
-  const ip = getClientIp(req);
-  const { username, password } = req.body;
-
-  // ===============================
-  // ADMIN LOGIN LOCK CHECK
-  // ===============================
-
-  if (isAdminLoginBlocked(ip)) {
-    const record = adminLoginAttempts.get(ip);
-
-    const remainingMinutes = Math.ceil(
-      (record.lockedUntil - Date.now()) / 60000
-    );
-
-    return res.status(429).json({
-      success: false,
-      message:
-        `बहुत ज्यादा गलत प्रयास हुए हैं। कृपया लगभग ${remainingMinutes} मिनट बाद फिर प्रयास करें।`
-    });
-  }
-
-  // ===============================
-  // ADMIN CREDENTIAL CHECK
-  // ===============================
-
-  if (
-    username !== process.env.ADMIN_USERNAME ||
-    password !== process.env.ADMIN_PASSWORD
-  ) {
-    const record = recordFailedAdminLogin(ip);
-
-    if (record.lockedUntil > Date.now()) {
-      return res.status(429).json({
-        success: false,
-        message:
-          "3 गलत login attempts हो चुके हैं। Admin login 15 मिनट के लिए block कर दिया गया है।"
-      });
-    }
-
-    const remainingAttempts =
-      MAX_ADMIN_LOGIN_ATTEMPTS - record.attempts;
-
-    return res.status(401).json({
-      success: false,
-      message:
-        `Username या Password गलत है। ${remainingAttempts} attempt बाकी हैं।`
-    });
-  }
-
-  // सही login होने पर failed attempts reset
-  clearAdminLoginAttempts(ip);
-
-  const token = generateAdminToken();
-  adminTokens.add(token);
-
-  res.json({
-    success: true,
-    message: "Admin login successful.",
-    token
-  });
-});
-
-
-
-// ===============================
-// ADMIN CARD SYSTEM
-// ===============================
-
-const cardsFile = path.join(__dirname, "cards.json");
-
-if (!fs.existsSync(cardsFile)) {
-  fs.writeFileSync(cardsFile, "[]");
-}
-
-app.get("/api/cards", (req, res) => {
-
-  try {
-
-    const cards =
-      JSON.parse(
-        fs.readFileSync(cardsFile, "utf8")
-      );
-
-    res.json({
-      success: true,
-      cards
-    });
-
-  } catch (error) {
-
-    console.error(error);
-
-    res.status(500).json({
-      success: false,
-      message: "Cards load नहीं हो पाए।"
-    });
-
-  }
-
-});
-
-app.post("/api/admin/cards", requireAdmin, (req, res) => {
-
-  try {
-
-    const {
-      title,
-      icon,
-      description,
-      section,
-      page
-    } = req.body;
-
-    if (!title || !section || !page) {
-
-      return res.status(400).json({
-        success: false,
-        message: "Title, section और page जरूरी हैं।"
-      });
-
-    }
-
-    const cards =
-      JSON.parse(
-        fs.readFileSync(cardsFile, "utf8")
-      );
-
-    const newCard = {
-      id: crypto.randomBytes(8).toString("hex"),
-      title: String(title).trim(),
-      icon: String(icon || "📚").trim(),
-      description: String(description || "").trim(),
-      section: String(section).trim().toLowerCase(),
-      page: String(page).trim(),
-      createdAt: new Date().toISOString()
-    };
-
-    cards.push(newCard);
-
-    fs.writeFileSync(
-      cardsFile,
-      JSON.stringify(cards, null, 2)
-    );
-
-    res.json({
-      success: true,
-      message: "New card successfully added.",
-      card: newCard
-    });
-
-  } catch (error) {
-
-    console.error(error);
-
-    res.status(500).json({
-      success: false,
-      message: "Card save नहीं हो पाया।"
-    });
-
-  }
-
-});
-
-app.delete(
-  "/api/admin/cards/:id",
-  requireAdmin,
-  (req, res) => {
-
-    try {
-
-      const cards =
-        JSON.parse(
-          fs.readFileSync(cardsFile, "utf8")
-        );
-
-      const oldLength = cards.length;
-
-      const updated =
-        cards.filter(
-          card => card.id !== req.params.id
-        );
-
-      if (updated.length === oldLength) {
-
-        return res.status(404).json({
-          success: false,
-          message: "Card नहीं मिला।"
-        });
-
-      }
-
-      fs.writeFileSync(
-        cardsFile,
-        JSON.stringify(updated, null, 2)
-      );
-
-      res.json({
-        success: true,
-        message: "Card deleted successfully."
-      });
-
-    } catch (error) {
-
-      console.error(error);
-
-      res.status(500).json({
-        success: false,
-        message: "Card delete नहीं हो पाया।"
-      });
-
-    }
-
-  }
-);
-
-
-// ===============================
-// PDF + VIDEO UPLOAD SYSTEM
-// ===============================
-
-const uploadsDir = path.join(__dirname, "uploads");
-
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-
-    const section = String(req.body.section || "")
-      .toLowerCase()
-      .replace(/[^a-z0-9-]/g, "");
-
-    const allowedSections = [
-      "ba",
-      "ma",
-      "upsc",
-      "net-jrf",
-      "uppcs",
-      "railway",
-      "ssc",
-      "banking",
-      "teaching",
-      "armed-forces",
-      "railway-exams",
-      "banking-exams",
-      "state-psc",
-      "civil-defence",
-      "law-professional",
-      "insurance",
-      "up-government",
-      "university-law",
-      "medical",
-      "engineering",
-      "research",
-      "police-defence"
-    ];
-
-    if (!allowedSections.includes(section)) {
-      return cb(new Error("Invalid section"));
-    }
-
-    // ==========================================
-    // SECTION + SUBJECT + PAPER FOLDER
-    // ==========================================
-
-    const subject =
-      String(req.body.subject || "general")
-        .trim()
-        .toLowerCase()
-        .replace(/[^a-z0-9]+/g, "-")
-        .replace(/^-+|-+$/g, "") ||
-      "general";
-
-    const paper =
-      String(req.body.paper || "general")
-        .trim()
-        .toLowerCase()
-        .replace(/[^a-z0-9]+/g, "-")
-        .replace(/^-+|-+$/g, "") ||
-      "general";
-
-    const folder = path.join(
-      uploadsDir,
-      section,
-      subject,
-      paper
-    );
-
-    fs.mkdirSync(folder, { recursive: true });
-
-    // Save relative folder for the upload route
-    req.uploadSection = section;
-    req.uploadSubject = subject;
-    req.uploadPaper = paper;
-
-    cb(null, folder);
-  },
-
-  filename: (req, file, cb) => {
-
-    const safeName =
-      Date.now() + "-" +
-      file.originalname.replace(
-        /[^a-zA-Z0-9._-]/g,
-        "_"
-      );
-
-    cb(null, safeName);
-  }
-});
-
-const upload = multer({
-  storage: storage,
-
-  limits: {
-    fileSize: 500 * 1024 * 1024
-  },
-
-  fileFilter: (req, file, cb) => {
-
-    const allowedMimeTypes = [
-      "application/pdf",
-      "video/mp4",
-      "video/webm",
-      "video/quicktime",
-      "application/octet-stream"
-    ];
-
-    const filename =
-      String(file.originalname || "").toLowerCase();
-
-    const allowedExtension =
-      filename.endsWith(".pdf") ||
-      filename.endsWith(".mp4") ||
-      filename.endsWith(".webm") ||
-      filename.endsWith(".mov") ||
-      filename.endsWith(".m4v");
-
-    if (
-      allowedMimeTypes.includes(file.mimetype) &&
-      allowedExtension
-    ) {
-      return cb(null, true);
-    }
-
-    if (allowedExtension) {
-      return cb(null, true);
-    }
-
-    cb(
-      new Error(
-        "Only PDF and video files are allowed."
-      )
-    );
-  }
-});
-
-app.use(
-  "/uploads",
-  express.static(uploadsDir)
-);
-
-// ===============================
-// UPLOAD / MULTER ERROR HANDLER
-// ===============================
-
-app.use((err, req, res, next) => {
-
-  if (err) {
-
-    console.error(
-      "UPLOAD MIDDLEWARE ERROR:",
-      err
-    );
-
-    if (
-      req.path === "/api/admin/upload" ||
-      req.originalUrl.startsWith("/api/admin/upload")
-    ) {
-
-      return res.status(400).json({
-        success: false,
-        message:
-          err.message ||
-          "File upload failed."
-      });
-    }
-  }
-
-  next(err);
-});
-
-app.post(
-  "/api/admin/upload",
-  requireAdmin,
-
-  (req, res, next) => {
-
-    upload.single("file")(req, res, (error) => {
-
-      if (error) {
-
-        console.error(
-          "MULTER UPLOAD ERROR:",
-          error
-        );
-
-        return res.status(500).json({
-          success: false,
-          message:
-            error.message ||
-            "File upload middleware error."
-        });
-      }
-
-      next();
-    });
-
-  },
-
-  (req, res) => {
-
-    try {
-
-      if (!req.file) {
-        return res.status(400).json({
-          success: false,
-          message: "File select करें।"
-        });
-      }
-
-      const section =
-        String(req.body.section || "")
-          .toLowerCase()
-          .trim();
-
-      const card =
-        String(req.body.card || "")
-          .trim();
-
-      const materialType =
-        String(req.body.materialType || "notes")
-          .toLowerCase()
-          .trim();
-
-      const semester =
-        String(req.body.semester || "")
-          .trim();
-
-      const paper =
-        String(req.body.paper || "")
-          .trim();
-
-      const subject =
-        String(req.body.subject || "")
-          .trim();
-
-      const allowedTypes = [
-        "pdf",
-        "pyq",
-        "notes",
-        "syllabus",
-        "book",
-        "video"
-      ];
-
-      if (!card) {
-        return res.status(400).json({
-          success: false,
-          message: "Card जरूरी है।"
-        });
-      }
-
-      if (!allowedTypes.includes(materialType)) {
-        return res.status(400).json({
-          success: false,
-          message: "Invalid material type."
-        });
-      }
-
-      const materialsFile =
-        path.join(__dirname, "materials.json");
-
-      let materials = [];
-
-      if (fs.existsSync(materialsFile)) {
-        try {
-          materials = JSON.parse(
-            fs.readFileSync(materialsFile, "utf8")
-          );
-        } catch {
-          materials = [];
-        }
-      }
-
-      const material = {
-        id: crypto.randomBytes(8).toString("hex"),
-        card: card,
-        section: section,
-        subject: subject,
-        semester: semester,
-        paper: paper,
-        type: materialType,
-        name: req.file.originalname,
-        filename: req.file.filename,
-        mimetype: req.file.mimetype,
-        url:
-          "/uploads/" +
-          section +
-          "/" +
-          (req.uploadSubject || "general") +
-          "/" +
-          (req.uploadPaper || "general") +
-          "/" +
-          req.file.filename,
-        createdAt: new Date().toISOString()
-      };
-
-      materials.push(material);
-
-      fs.writeFileSync(
-        materialsFile,
-        JSON.stringify(materials, null, 2)
-      );
-
-      res.json({
-        success: true,
-        message: "File successfully upload हो गई।",
-        material: material
-      });
-
-    } catch (error) {
-
-      console.error("UPLOAD ROUTE ERROR:", error);
-
-      res.status(500).json({
-        success: false,
-        message: "File upload नहीं हो पाया।",
-        error: error.message || String(error)
-      });
-
-    }
-
-  }
-);
-
-
-const PORT = process.env.PORT || 5000;
+const PORT = 5000;
 
 const articlesFile =
   path.join(__dirname, "articles.json");
@@ -733,400 +37,18 @@ if (!fs.existsSync(usersFile)) {
 const otpStore = {};
 
 
-
 // ===============================
 // BACKEND CHECK
 // ===============================
 
-// ===============================
-// MATERIALS GET
-// ===============================
-
-app.get("/api/materials/:section", (req, res) => {
-
-  try {
-
-    const section =
-      String(req.params.section || "")
-        .toLowerCase();
-
-    const allowedSections = [
-      "ba",
-      "ma",
-      "upsc",
-      "uppcs",
-      "net-jrf",
-      "railway",
-      "ssc",
-      "banking",
-      "teaching",
-      "armed-forces",
-      "railway-exams",
-      "banking-exams",
-      "state-psc",
-      "civil-defence",
-      "law-professional",
-      "insurance",
-      "up-government",
-      "university-law",
-      "medical",
-      "engineering",
-      "research",
-      "police-defence"
-    ];
-
-    if (!allowedSections.includes(section)) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid section"
-      });
-    }
-
-    const folder = path.join(uploadsDir, section);
-
-    if (!fs.existsSync(folder)) {
-      return res.json({
-        success: true,
-        section,
-        files: []
-      });
-    }
-
-    // ==========================================
-    // RECURSIVE MATERIALS LIST
-    // Section → Subject → Paper → File
-    // ==========================================
-
-    const files = [];
-
-    function scanMaterials(currentFolder, relativeFolder = "") {
-
-      const entries = fs.readdirSync(currentFolder, {
-        withFileTypes: true
-      });
-
-      for (const entry of entries) {
-
-        const fullPath =
-          path.join(currentFolder, entry.name);
-
-        const relativePath =
-          relativeFolder
-            ? path.join(relativeFolder, entry.name)
-            : entry.name;
-
-        if (entry.isDirectory()) {
-
-          scanMaterials(
-            fullPath,
-            relativePath
-          );
-
-        } else {
-
-          const normalizedParts = relativePath
-.replace(/\\/g, "/")
-              .split("/")
-              .filter(Boolean);
-
-            const paperPart = normalizedParts.length >= 2
-              ? normalizedParts[normalizedParts.length - 2]
-              : "";
-
-            const subjectPart = normalizedParts.length >= 3
-              ? normalizedParts[normalizedParts.length - 3]
-              : "";
-
-            const toTitle = (value) =>
-              value.replace(/-/g, " ")
-                .replace(/\b\w/g, c => c.toUpperCase());
-
-            const paper = toTitle(paperPart);
-            const subject = toTitle(subjectPart);
-
-            const ext = path.extname(entry.name).toLowerCase();
-
-            const materialType =
-              ext === ".pdf" ? "pdf" :
-              [".mp4", ".webm", ".mov", ".mkv"].includes(ext) ? "video" :
-              "notes";
-
-            files.push({
-              name: entry.name,
-              path: relativePath.replace(/\\/g, "/"),
-              paper,
-              subject,
-              materialType,
-              url:
-                "/uploads/" +
-                section +
-                "/" +
-                normalizedParts
-                  .map(part => encodeURIComponent(part))
-                  .join("/")
-            });
-
-        }
-      }
-    }
-
-    scanMaterials(folder);
-
-    res.json({
-      success: true,
-      section,
-      files
-    });
-
-  } catch (error) {
-
-    console.error(error);
-
-    res.status(500).json({
-      success: false,
-      message: "Materials load नहीं हो पाए।"
-    });
-
-  }
-
-});
-
-
-
-// ===============================
-// CARD MATERIALS GET
-// ===============================
-
-app.get("/api/card-materials", (req, res) => {
-
-  try {
-
-    const card = String(req.query.card || "").trim();
-    const type = String(req.query.type || "").toLowerCase().trim();
-    const semester = String(req.query.semester || "").trim();
-    const paper = String(req.query.paper || "").trim();
-    const subject = String(req.query.subject || "").trim();
-
-    if (!card) {
-      return res.status(400).json({
-        success: false,
-        message: "Card जरूरी है।"
-      });
-    }
-
-    const allowedTypes = [
-      "pdf",
-      "pyq",
-      "notes",
-      "syllabus",
-      "book",
-      "video"
-    ];
-
-    if (type && !allowedTypes.includes(type)) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid material type."
-      });
-    }
-
-    const materialsFile =
-      path.join(__dirname, "materials.json");
-
-    let materials = [];
-
-    if (fs.existsSync(materialsFile)) {
-      try {
-        materials =
-          JSON.parse(
-            fs.readFileSync(materialsFile, "utf8")
-          );
-      } catch {
-        materials = [];
-      }
-    }
-
-    const matched =
-      materials.filter(material => {
-
-        const sameCard =
-          String(material.card || "").trim() === card;
-
-        const sameType =
-          !type ||
-          String(material.type || "").toLowerCase() === type;
-
-        const sameSemester =
-          !semester ||
-          String(material.semester || "").trim() === semester;
-
-        const samePaper =
-          !paper ||
-          String(material.paper || "").trim() === paper;
-
-        const sameSubject =
-          !subject ||
-          String(material.subject || "").trim() === subject;
-
-        return sameCard &&
-          sameType &&
-          sameSemester &&
-          samePaper &&
-          sameSubject;
-      });
-
-    res.json({
-      success: true,
-      card,
-      type: type || null,
-      semester: semester || null,
-      paper: paper || null,
-      subject: subject || null,
-      materials: matched
-    });
-
-  } catch (error) {
-
-    console.error(error);
-
-    res.status(500).json({
-      success: false,
-      message: "Card materials load नहीं हो पाए।"
-    });
-
-  }
-
-});
-
-// ===============================
-// ADMIN DELETE MATERIAL
-// ===============================
-
-app.delete(
-  "/api/admin/materials/:section/:filename",
-  requireAdmin,
-  (req, res) => {
-
-    try {
-
-      const section =
-        String(req.params.section || "")
-          .toLowerCase();
-
-      const filename =
-        path.basename(req.params.filename || "");
-
-      const allowedSections = [
-        "ba",
-        "ma",
-        "upsc",
-        "uppcs",
-        "net-jrf",
-        "railway",
-        "ssc",
-        "banking",
-        "teaching",
-        "armed-forces",
-        "railway-exams",
-        "banking-exams",
-        "state-psc",
-        "civil-defence",
-        "law-professional",
-        "insurance",
-        "up-government",
-        "university-law",
-        "medical",
-        "engineering",
-        "research",
-        "police-defence"
-      ];
-
-      if (!allowedSections.includes(section)) {
-        return res.status(400).json({
-          success: false,
-          message: "Invalid section."
-        });
-      }
-
-      if (!filename) {
-        return res.status(400).json({
-          success: false,
-          message: "Invalid file."
-        });
-      }
-
-      const filePath =
-        path.join(
-          uploadsDir,
-          section,
-          filename
-        );
-
-      if (!fs.existsSync(filePath)) {
-        return res.status(404).json({
-          success: false,
-          message: "File नहीं मिली।"
-        });
-      }
-
-      fs.unlinkSync(filePath);
-
-      // Remove deleted file from materials.json
-      const materialsFile = path.join(__dirname, "materials.json");
-
-      if (fs.existsSync(materialsFile)) {
-        try {
-          let materials = JSON.parse(
-            fs.readFileSync(materialsFile, "utf8")
-          );
-
-          const beforeCount = materials.length;
-
-          materials = materials.filter(material => {
-            return !(
-              String(material.section || "").toLowerCase() === section &&
-              String(material.filename || "") === filename
-            );
-          });
-
-          if (materials.length !== beforeCount) {
-            fs.writeFileSync(
-              materialsFile,
-              JSON.stringify(materials, null, 2)
-            );
-          }
-        } catch (jsonError) {
-          console.error(
-            "materials.json update error:",
-            jsonError
-          );
-        }
-      }
-
-      res.json({
-        success: true,
-        message: "File successfully deleted.",
-        file: filename,
-        section: section
-      });
-
-    } catch (error) {
-
-      console.error(error);
-
-      res.status(500).json({
-        success: false,
-        message: "File delete नहीं हो पाई।"
-      });
-
-    }
-
-  }
-);
-
-
 app.get("/", (req, res) => {
-  res.sendFile(path.join(__dirname, "public", "index.html"));
+
+  res.json({
+    success: true,
+    message:
+      "The Ravishankar Insights Backend is running."
+  });
+
 });
 
 
@@ -1170,7 +92,7 @@ app.get("/api/articles", (req, res) => {
 // ARTICLES SAVE
 // ===============================
 
-app.post("/api/articles", requireAdmin, (req, res) => {
+app.post("/api/articles", (req, res) => {
 
   try {
 
@@ -1322,34 +244,6 @@ app.post(
 
       }
 
-
-      // ===============================
-      // CHECK ALREADY REGISTERED USER
-      // ===============================
-
-      const users =
-        JSON.parse(
-          fs.readFileSync(
-            usersFile,
-            "utf8"
-          )
-        );
-
-      const alreadyExists =
-        users.find(
-          user =>
-            user.email.toLowerCase() === email.toLowerCase()
-            ||
-            user.mobile === mobile
-        );
-
-      if (alreadyExists) {
-        return res.status(400).json({
-          success: false,
-          message:
-            "इस Email या Mobile से account पहले से मौजूद है।"
-        });
-      }
 
       // 6 digit temporary OTP
       const otp =
@@ -1539,16 +433,25 @@ app.post(
       }
 
 
-      const normalizedEmail = email.trim().toLowerCase();
+      const users =
+        JSON.parse(
+          fs.readFileSync(
+            usersFile,
+            "utf8"
+          )
+        );
 
-      const existingUser = await pool.query(
-        `SELECT id FROM students
-         WHERE LOWER(email) = $1 OR mobile = $2
-         LIMIT 1`,
-        [normalizedEmail, mobile]
-      );
 
-      if (existingUser.rows.length > 0) {
+      const alreadyExists =
+        users.find(
+          user =>
+            user.email === email
+            ||
+            user.mobile === mobile
+        );
+
+
+      if (alreadyExists) {
 
         return res.status(400).json({
 
@@ -1561,25 +464,39 @@ app.post(
 
       }
 
-      const bcrypt = require("bcryptjs");
 
-      const passwordHash =
-        await bcrypt.hash(password, 10);
+      const newUser = {
 
-      const result = await pool.query(
-        `INSERT INTO students
-         (name, mobile, email, password)
-         VALUES ($1, $2, $3, $4)
-         RETURNING id, name, mobile, email, created_at`,
-        [
-          name.trim(),
-          mobile,
-          normalizedEmail,
-          passwordHash
-        ]
+        id: Date.now(),
+
+        name: name,
+
+        mobile: mobile,
+
+        email: email,
+
+        password: password,
+
+        createdAt:
+          new Date().toISOString()
+
+      };
+
+
+      users.push(newUser);
+
+
+      fs.writeFileSync(
+
+        usersFile,
+
+        JSON.stringify(
+          users,
+          null,
+          2
+        )
+
       );
-
-      const newUser = result.rows[0];
 
 
       delete otpStore[mobile];
@@ -1658,41 +575,25 @@ app.post(
       }
 
 
-      const normalizedEmail =
-        email.trim().toLowerCase();
-
-      const result = await pool.query(
-        `SELECT id, name, mobile, email, password
-         FROM students
-         WHERE LOWER(email) = $1
-         LIMIT 1`,
-        [normalizedEmail]
-      );
-
-      if (result.rows.length === 0) {
-
-        return res.status(401).json({
-
-          success: false,
-
-          message:
-            "Email या Password गलत है।"
-
-        });
-
-      }
-
-      const user = result.rows[0];
-
-      const bcrypt = require("bcryptjs");
-
-      const passwordMatch =
-        await bcrypt.compare(
-          password,
-          user.password
+      const users =
+        JSON.parse(
+          fs.readFileSync(
+            usersFile,
+            "utf8"
+          )
         );
 
-      if (!passwordMatch) {
+
+      const user =
+        users.find(
+          item =>
+            item.email === email
+            &&
+            item.password === password
+        );
+
+
+      if (!user) {
 
         return res.status(401).json({
 
@@ -1705,30 +606,6 @@ app.post(
 
       }
 
-      const studentSession =
-        generateStudentSession();
-
-      studentSessions.set(
-        studentSession,
-        {
-          id: user.id,
-          name: user.name,
-          mobile: user.mobile,
-          email: user.email
-        }
-      );
-
-      res.cookie(
-        "studentSession",
-        studentSession,
-        {
-          httpOnly: true,
-          secure: true,
-          sameSite: "none",
-          maxAge: 24 * 60 * 60 * 1000,
-          path: "/"
-        }
-      );
 
       res.json({
 
@@ -1736,8 +613,6 @@ app.post(
 
         message:
           "Login successful.",
-
-        studentSession,
 
         user: {
 
@@ -1774,79 +649,314 @@ app.post(
 );
 
 
-// STUDENT SESSION CHECK
-app.get("/api/student/session", (req, res) => {
-
-  const auth =
-    req.headers.authorization || "";
-
-  let token = "";
-
-  if (auth.startsWith("Bearer ")) {
-    token = auth.substring(7);
-  }
-
-  if (!token) {
-    token =
-      req.cookies.studentSession || "";
-  }
-
-  if (!token || !studentSessions.has(token)) {
-    return res.status(401).json({
-      success: false,
-      loggedIn: false
-    });
-  }
-
-  res.json({
-    success: true,
-    loggedIn: true,
-    user: studentSessions.get(token)
-  });
-});
-
-
-// ===============================
-// STUDENT LOGOUT
-// ===============================
-
-app.post("/api/student/logout", (req, res) => {
-  const token = req.cookies.studentSession;
-
-  if (token) {
-    studentSessions.delete(token);
-  }
-
-  res.clearCookie("studentSession", {
-    httpOnly: true,
-    secure: true,
-    sameSite: "none",
-    path: "/"
-  });
-
-  res.json({
-    success: true,
-    message: "Logout successful."
-  });
-});
-
-
 // ===============================
 // SERVER START
 // ===============================
 
 
-app.get("/admin", (req, res) => {
-  res.sendFile(path.join(__dirname, "public", "admin.html"));
+// ============================================================
+// MATERIAL UPLOAD SYSTEM — RESTORED
+// ============================================================
+
+const multer = require("multer");
+
+const uploadsDir = path.join(__dirname, "uploads");
+const materialsFile = path.join(__dirname, "materials.json");
+
+if (!fs.existsSync(uploadsDir)) {
+  fs.mkdirSync(uploadsDir, { recursive: true });
+}
+
+if (!fs.existsSync(materialsFile)) {
+  fs.writeFileSync(materialsFile, "[]");
+}
+
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    cb(null, uploadsDir);
+  },
+
+  filename: (req, file, cb) => {
+    const safeName = file.originalname
+      .replace(/[^a-zA-Z0-9._-]/g, "_");
+
+    cb(null, Date.now() + "-" + safeName);
+  }
 });
+
+const upload = multer({
+  storage,
+  limits: {
+    fileSize: 200 * 1024 * 1024
+  },
+  fileFilter: (req, file, cb) => {
+    const allowed = [
+      "application/pdf",
+      "video/mp4",
+      "video/webm",
+      "video/quicktime"
+    ];
+
+    if (allowed.includes(file.mimetype)) {
+      cb(null, true);
+    } else {
+      cb(new Error("Only PDF and video files are allowed."));
+    }
+  }
+});
+
+app.use("/uploads", express.static(uploadsDir));
+
+// Admin token system
+const adminTokens = new Set();
+
+function generateAdminToken() {
+  return (
+    Date.now().toString(36) +
+    "-" +
+    Math.random().toString(36).slice(2) +
+    "-" +
+    Math.random().toString(36).slice(2)
+  );
+}
+
+function requireAdmin(req, res, next) {
+  const auth = req.headers.authorization || "";
+
+  if (!auth.startsWith("Bearer ")) {
+    return res.status(401).json({
+      success: false,
+      message: "Admin login required."
+    });
+  }
+
+  const token = auth.slice(7);
+
+  if (!adminTokens.has(token)) {
+    return res.status(401).json({
+      success: false,
+      message: "Invalid admin token."
+    });
+  }
+
+  next();
+}
+
+// ------------------------------------------------------------
+// ADMIN LOGIN
+// ------------------------------------------------------------
+
+app.post("/api/admin/login", (req, res) => {
+  const { username, password } = req.body;
+
+  const adminUsername =
+    process.env.ADMIN_USERNAME || "admin";
+
+  const adminPassword =
+    process.env.ADMIN_PASSWORD || "admin123";
+
+  if (
+    username !== adminUsername ||
+    password !== adminPassword
+  ) {
+    return res.status(401).json({
+      success: false,
+      message: "Invalid admin login."
+    });
+  }
+
+  const token = generateAdminToken();
+
+  adminTokens.add(token);
+
+  res.json({
+    success: true,
+    token
+  });
+});
+
+// ------------------------------------------------------------
+// ADMIN LOGOUT
+// ------------------------------------------------------------
+
+app.post("/api/admin/logout", requireAdmin, (req, res) => {
+  const auth = req.headers.authorization || "";
+  const token = auth.slice(7);
+
+  adminTokens.delete(token);
+
+  res.json({
+    success: true,
+    message: "Admin logout successful."
+  });
+});
+
+// ------------------------------------------------------------
+// ADMIN MATERIAL UPLOAD
+// ------------------------------------------------------------
+
+app.post(
+  "/api/admin/upload",
+  requireAdmin,
+  upload.single("file"),
+  (req, res) => {
+    try {
+      if (!req.file) {
+        return res.status(400).json({
+          success: false,
+          message: "File required."
+        });
+      }
+
+      const {
+        section,
+        card,
+        materialType,
+        paper,
+        subject,
+        semester
+      } = req.body;
+
+      if (!section) {
+        fs.unlinkSync(req.file.path);
+
+        return res.status(400).json({
+          success: false,
+          message: "Section required."
+        });
+      }
+
+      const materials = JSON.parse(
+        fs.readFileSync(materialsFile, "utf8")
+      );
+
+      const material = {
+        id: Date.now(),
+        section: section || "",
+        card: card || "",
+        subject: subject || "",
+        paper: paper || "",
+        semester: semester || "",
+        materialType: materialType || "notes",
+
+        originalName: req.file.originalname,
+
+        filename: req.file.filename,
+
+        url:
+          "/uploads/" +
+          encodeURIComponent(req.file.filename),
+
+        mimetype: req.file.mimetype,
+
+        size: req.file.size,
+
+        createdAt: new Date().toISOString()
+      };
+
+      materials.push(material);
+
+      fs.writeFileSync(
+        materialsFile,
+        JSON.stringify(materials, null, 2)
+      );
+
+      res.json({
+        success: true,
+        message: "Material uploaded successfully.",
+        material
+      });
+
+    } catch (error) {
+      console.error("UPLOAD ERROR:", error);
+
+      if (req.file && fs.existsSync(req.file.path)) {
+        try {
+          fs.unlinkSync(req.file.path);
+        } catch (_) {}
+      }
+
+      res.status(500).json({
+        success: false,
+        message: "Material upload failed."
+      });
+    }
+  }
+);
+
+// ------------------------------------------------------------
+// MATERIALS GET
+// ------------------------------------------------------------
+
+app.get("/api/materials/:section", (req, res) => {
+  try {
+    const section = req.params.section.toLowerCase();
+
+    const materials = JSON.parse(
+      fs.readFileSync(materialsFile, "utf8")
+    );
+
+    const filtered = materials.filter(
+      item =>
+        String(item.section).toLowerCase() === section
+    );
+
+    res.json({
+      success: true,
+      materials: filtered
+    });
+
+  } catch (error) {
+    console.error("MATERIAL LOAD ERROR:", error);
+
+    res.status(500).json({
+      success: false,
+      message: "Materials load failed."
+    });
+  }
+});
+
+
+// ===============================
+// RAVISHANKAR AI
+// ===============================
+
+app.post("/api/ai/chat", async (req, res) => {
+  try {
+    const { message } = req.body;
+
+    if (!message || !message.trim()) {
+      return res.status(400).json({
+        success: false,
+        message: "Message is required."
+      });
+    }
+
+    const answer = await askRavishankarAI(message);
+
+    res.json({
+      success: true,
+      answer
+    });
+
+  } catch (error) {
+    console.error("RAVISHANKAR AI ERROR:", error);
+
+    res.status(500).json({
+      success: false,
+      message: error.message || "AI response नहीं मिल पाया।"
+    });
+  }
+});
+
 
 app.listen(
   PORT,
-  "0.0.0.0",
+  "127.0.0.1",
   () => {
 
     console.log(
-      "The Ravishankar Insights Backend running on http://0.0.0.0:$PORT"
+      "The Ravishankar Insights Backend running on http://127.0.0.1:5000"
     );
 
   }
